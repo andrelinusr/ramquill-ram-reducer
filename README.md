@@ -122,4 +122,4 @@ ramquill.ico         (opcional) ícone do aplicativo
 
 Código original, escrito a partir da técnica pública de limpeza de listas de memória do Windows, também usada por utilitários como o [Mem Reduct](https://github.com/henrypp/memreduct) (GPLv3). Nenhum trecho do código do Mem Reduct foi copiado.
 
-Licença: defina aqui a licença do projeto (por exemplo, MIT) e adicione o arquivo `LICENSE`.
+
