@@ -1,71 +1,67 @@
 # RamQuill
 
-[Português (BR)](README.pt-BR.md)
+Limpador de memória RAM e desativador do serviço SysMain para **Windows 10/11**, escrito em **C puro (C17)** com a API nativa do Windows. Sem frameworks, sem runtime extra e sem instalação: um único `.exe` com interface escura em preto e azul.
 
-A RAM cleaner and SysMain disabler for **Windows 10/11**, written in **pure C (C17)** on top of the native Windows API. No frameworks, no extra runtime, no installer: a single `.exe` with a dark black-and-blue interface.
-
-> Built with low-memory machines in mind (for example, laptops with 4 GB of RAM), where a quick memory relief or turning off SysMain can make a noticeable difference.
+> Pensado para máquinas com pouca RAM (por exemplo, notebooks com 4 GB), onde um alívio rápido de memória ou desativar o SysMain faz diferença.
 
 ---
 
-## What it is
+## O que é
 
-RamQuill asks Windows to give back memory that applications are holding but not actively using, and to flush several system caches. **It does not close any program or kill any process.** It also has a button to stop and disable the **SysMain** service (formerly Superfetch).
+O RamQuill pede ao Windows para devolver a memória que os programas guardam sem estar usando e esvazia alguns caches do sistema. **Ele não fecha nenhum programa nem processo.** Também tem um botão para parar e desativar o serviço **SysMain** (o antigo Superfetch).
 
-The interface shows RAM usage on an **animated circular progress gauge** with the percentage in the middle, plus a log of every operation below it.
+A interface mostra o uso de RAM em um **anel de progresso circular animado**, com a porcentagem no centro, e um registro das operações logo abaixo.
 
-## Features
+## Recursos
 
-- Circular progress gauge with smooth animation, glow and rounded ends, software-rendered with antialiasing.
-- One-click **Clean RAM**, in two intensities: standard and deep.
-- **Disable SysMain** through the Windows Service Control Manager (no `sc.exe` calls).
-- **Auto-clean** when RAM usage crosses a threshold (default: 85%), with a 60-second minimum interval between runs.
-- **System tray** icon: minimizing sends the app to the tray, with a menu to open, clean or exit.
-- Step-by-step log that shows the `NTSTATUS` code when something fails.
-- Single instance, automatic DPI scaling and dark title bar.
-- Settings stored in `%APPDATA%\RamQuill\RamQuill.ini`.
+- Anel de progresso circular com animação suave, brilho e pontas arredondadas, desenhado por software com antialiasing.
+- **Limpar RAM** em um clique, com duas intensidades: padrão e profunda.
+- **Desativar SysMain** pelo Gerenciador de Serviços do Windows (sem chamar `sc.exe`).
+- **Auto-limpeza** quando o uso de RAM passa de um limite (padrão: 85%), com intervalo mínimo de 60 segundos entre execuções.
+- Ícone na **bandeja do sistema**: minimizar envia o app para lá, com menu para abrir, limpar ou sair.
+- Registro das etapas, mostrando o código `NTSTATUS` quando algo falha.
+- Instância única, escala automática de DPI e barra de título escura.
+- Configurações salvas em `%APPDATA%\RamQuill\RamQuill.ini`.
 
-## How it works
+## Como funciona
 
-Cleaning runs on a separate worker thread so the window never freezes. Steps run in the order below; a bit mask decides which ones are executed.
+A limpeza roda em uma thread separada para a janela não travar. As etapas seguem esta ordem, e a máscara de opções define quais são executadas:
 
-| # | Step | How |
-|---|------|-----|
-| 1 | Working set of all processes | `NtSetSystemInformation` → `SystemMemoryListInformation` (`MemoryEmptyWorkingSets`) |
-| 2 | System file cache | `SetSystemFileCacheSize(-1, -1, 0)` |
-| 3 | Write cache of fixed volumes | `CreateFileW("\\.\X:")` + `FlushFileBuffers` |
-| 4 | Modified page list *(deep)* | `MemoryFlushModifiedList` |
-| 5 | Standby list *(deep)* | `MemoryPurgeStandbyList` |
-| 6 | Low-priority standby list | `MemoryPurgeLowPriorityStandbyList` |
-| 7 | Registry cache | `SystemRegistryReconciliationInformation` (class 155) |
-| 8 | Identical page combining | `SystemCombinePhysicalMemoryInformation` (class 130) |
+| # | Etapa | Como |
+|---|-------|------|
+| 1 | Working set de todos os processos | `NtSetSystemInformation` → `SystemMemoryListInformation` (`MemoryEmptyWorkingSets`) |
+| 2 | Cache de arquivos do sistema | `SetSystemFileCacheSize(-1, -1, 0)` |
+| 3 | Cache de escrita dos volumes fixos | `CreateFileW("\\.\X:")` + `FlushFileBuffers` |
+| 4 | Lista de páginas modificadas *(profunda)* | `MemoryFlushModifiedList` |
+| 5 | Lista standby *(profunda)* | `MemoryPurgeStandbyList` |
+| 6 | Standby de baixa prioridade | `MemoryPurgeLowPriorityStandbyList` |
+| 7 | Cache do registro | `SystemRegistryReconciliationInformation` (classe 155) |
+| 8 | Combinação de páginas idênticas | `SystemCombinePhysicalMemoryInformation` (classe 130) |
 
-**Details worth knowing**
+**Detalhes importantes**
 
-- `NtSetSystemInformation` is resolved at runtime with `GetProcAddress` from `ntdll.dll`.
-- Before cleaning, the app enables `SeProfileSingleProcessPrivilege` and `SeIncreaseQuotaPrivilege` on its own token (`OpenProcessToken`, `LookupPrivilegeValueW`, `AdjustTokenPrivileges`).
-- If step 1 fails, a **fallback** walks the process list with `EnumProcesses` and calls `EmptyWorkingSet` on each one, **skipping critical processes** (`csrss`, `smss`, `wininit`, `services`, `lsass`, `winlogon`, `System`, `Registry` and unnamed processes).
-- Steps 4 and 5 only run in **deep** mode, because they can cause a brief slowdown right after cleaning (Windows has to read data back from disk).
-- The order is deliberate: data written to disk in steps 2–4 can be discarded in the same pass by steps 5–6.
-- **SysMain** is handled through the Service Control Manager: `ChangeServiceConfigW` sets the start type to *Disabled* and `ControlService` sends the stop request.
+- `NtSetSystemInformation` é carregada em tempo de execução com `GetProcAddress` a partir da `ntdll.dll`.
+- Antes de limpar, o app habilita `SeProfileSingleProcessPrivilege` e `SeIncreaseQuotaPrivilege` no próprio token (`OpenProcessToken`, `LookupPrivilegeValueW`, `AdjustTokenPrivileges`).
+- Se o passo 1 falhar, entra um **plano B** que percorre os processos com `EnumProcesses` e aplica `EmptyWorkingSet` em cada um, **ignorando processos críticos** (`csrss`, `smss`, `wininit`, `services`, `lsass`, `winlogon`, `System`, `Registry` e processos sem nome).
+- Os passos 4 e 5 ficam só no modo **profundo**, porque podem causar uma lentidão passageira logo após a limpeza (o Windows precisa reler dados do disco).
+- A ordem foi escolhida para que o que foi gravado no disco (passos 2 a 4) já possa ser descartado na mesma passada (passos 5 e 6).
+- O **SysMain** é controlado pelo Service Control Manager: `ChangeServiceConfigW` define a inicialização como *Desativado* e `ControlService` envia o comando de parada.
 
-**A note on the numbers:** memory usage comes from `GlobalMemoryStatusEx`, which counts the standby list as available memory. That means the gauge can drop right after a clean even though some of those pages are still physically in RAM, just on a different list.
+**Nota sobre os números:** o uso de RAM vem de `GlobalMemoryStatusEx`, que conta a lista standby como memória disponível. Por isso o anel pode cair logo após a limpeza mesmo que parte daquelas páginas ainda esteja fisicamente na RAM, só em outra lista.
 
-## Usage
+## Como usar
 
-1. Run `RamQuill.exe`. Windows will ask for **Administrator** permission, which is required to touch system memory and services.
-2. Use the buttons:
-   - **LIMPAR RAM** (clean RAM): runs the cleanup.
-   - **DESATIVAR SYSMAIN** (disable SysMain): stops the service and prevents it from starting with Windows.
-   - **FAZER TUDO** (do everything): disables SysMain and cleans RAM.
-3. Optional switches:
-   - **Auto-clean when RAM goes above 85%**: enables automatic cleaning.
-   - **Deep clean**: also flushes the standby and modified lists (frees more, with a possible short slowdown).
-4. Minimize to send the app to the tray. Click the tray icon to reopen it, or right-click for the menu. The close button exits the program.
+1. Abra o `RamQuill.exe`. O Windows vai pedir permissão de **Administrador**, que é necessária para mexer na memória do sistema e nos serviços.
+2. Use os botões:
+   - **LIMPAR RAM**: executa a limpeza.
+   - **DESATIVAR SYSMAIN**: para o serviço e impede que ele inicie com o Windows.
+   - **FAZER TUDO**: desativa o SysMain e limpa a RAM.
+3. Chaves opcionais:
+   - **Limpar automaticamente quando a RAM passar de 85%**: liga a auto-limpeza.
+   - **Limpeza profunda**: inclui as listas standby e modified (libera mais, com possível lentidão passageira).
+4. Minimize para mandar o app para a bandeja. Clique no ícone para reabrir ou use o botão direito para o menu. O botão de fechar encerra o programa.
 
-> The interface text is currently in Portuguese. Translating the labels is a matter of editing the string literals in `main.c`.
-
-### Configuration file
+### Arquivo de configuração
 
 `%APPDATA%\RamQuill\RamQuill.ini`:
 
@@ -76,17 +72,17 @@ DeepClean=0
 Threshold=85
 ```
 
-`Threshold` accepts values from 50 to 99.
+`Threshold` aceita valores de 50 a 99.
 
-## Building
+## Compilar
 
-**Requirements:** 64-bit Windows 10/11 and a **MinGW-w64 GCC** toolchain (for example [WinLibs](https://winlibs.com) as a ZIP, or MSYS2).
+**Requisitos:** Windows 10/11 64 bits e um compilador **GCC do MinGW-w64** (por exemplo, o [WinLibs](https://winlibs.com) em ZIP, ou o MSYS2).
 
-### Quick way
+### Jeito rápido
 
-Put `main.c`, `ramquill.manifest` and `compilar.bat` in the same folder (plus a `ramquill.ico` if you want a custom icon) and double-click `compilar.bat`. It looks for gcc on its own and, if it can't find it, asks for the path of the `bin` folder.
+Deixe `main.c`, `ramquill.manifest` e `compilar.bat` na mesma pasta (e, se quiser um ícone próprio, um `ramquill.ico`) e dê dois cliques no `compilar.bat`. Ele procura o gcc sozinho e, se não achar, pergunta o caminho da pasta `bin`.
 
-### Manually
+### Manualmente
 
 ```bat
 echo 1 24 "ramquill.manifest" > ramquill.rc
@@ -98,32 +94,32 @@ gcc -std=gnu17 -O2 -s -municode -mwindows -static -Wall -Wextra ^
     -lgdi32 -luser32 -ladvapi32 -lpsapi -ldwmapi -lshell32 -lm
 ```
 
-To embed an icon, add `1 ICON "ramquill.ico"` to `ramquill.rc` before running `windres`.
+Para colocar um ícone no executável, adicione `1 ICON "ramquill.ico"` ao `ramquill.rc` antes de rodar o `windres`.
 
-## DLLs used
+## DLLs usadas
 
-All of them ship with Windows: `kernel32`, `user32`, `gdi32`, `advapi32`, `shell32`, `dwmapi` and the system C runtime. `ntdll` is accessed at runtime through `GetProcAddress`. `libgcc` and `winpthread` are embedded by `-static`.
+Todas já vêm no Windows: `kernel32`, `user32`, `gdi32`, `advapi32`, `shell32`, `dwmapi` e a runtime C do sistema. A `ntdll` é acessada em tempo de execução (`GetProcAddress`). `libgcc` e `winpthread` são embutidas pelo `-static`.
 
-## Project layout
+## Estrutura do projeto
 
 ```
-main.c               full source code
-ramquill.manifest    requests Administrator and declares compatibility and DPI awareness
-compilar.bat         Windows build script
-ramquill.ico         (optional) application icon
+main.c               código-fonte completo
+ramquill.manifest    pede Administrador e declara compatibilidade e DPI
+compilar.bat         script de compilação para Windows
+ramquill.ico         (opcional) ícone do aplicativo
 ```
 
-## Warnings
+## Avisos
 
-- RamQuill **does not terminate processes**, inject code, write into other programs' memory, or use the network.
-- Cleaning RAM gives **temporary relief**: programs reclaim memory as you use them, and right after a clean the system may feel slightly slower until caches fill up again. Avoid deep cleaning on virtual machines, databases with large caches, and real-time audio or video work.
-- Some steps rely on **undocumented Windows calls**. They may change or be missing on certain versions; when one fails, the log shows the `NTSTATUS`.
-- **Reverting SysMain:** run `sc config SysMain start= auto` and `sc start SysMain` in an elevated terminal, or use `services.msc`.
-- Antivirus software may flag new programs that touch memory and services (a common false positive). The source code is open for review.
-- Use at your own risk.
+- O RamQuill **não encerra processos**, não injeta código, não grava na memória de outros programas e não usa rede.
+- Limpar a RAM dá **alívio temporário**: os programas voltam a ocupar memória conforme são usados, e logo após a limpeza o sistema pode ficar um pouco mais lento até os caches se reencherem. Evite a limpeza profunda em máquinas virtuais, bancos de dados com cache grande e trabalho de áudio ou vídeo em tempo real.
+- Algumas etapas usam **chamadas não documentadas** do Windows. Elas podem mudar ou não existir em certas versões; quando uma falha, o registro mostra o `NTSTATUS`.
+- **Desfazer o SysMain:** rode `sc config SysMain start= auto` e `sc start SysMain` em um terminal de Administrador, ou use o `services.msc`.
+- Antivírus podem alertar sobre programas novos que mexem em memória e serviços (falso positivo comum). O código-fonte está aberto para conferência.
+- Use por sua conta e risco.
 
-## Credits and license
+## Créditos e licença
 
-Original code, written from the publicly known technique of clearing Windows memory lists, which is also used by utilities such as [Mem Reduct](https://github.com/henrypp/memreduct) (GPLv3). No code from Mem Reduct was copied.
+Código original, escrito a partir da técnica pública de limpeza de listas de memória do Windows, também usada por utilitários como o [Mem Reduct](https://github.com/henrypp/memreduct) (GPLv3). Nenhum trecho do código do Mem Reduct foi copiado.
 
-License: set the project license here (for example, MIT) and add a `LICENSE` file.
+Licença: defina aqui a licença do projeto (por exemplo, MIT) e adicione o arquivo `LICENSE`.
